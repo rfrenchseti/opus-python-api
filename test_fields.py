@@ -2,9 +2,9 @@ import pandas as pd
 
 from opusapi import *
 
-O = OPUSAPI()
+O = OPUSAPI(verbose=True)
 
-f = O.get_raw_fields()
+f = O.raw_fields
 print('*** Raw Fields as Dict:')
 print('Multiple:')
 print(f['target'])
@@ -21,7 +21,7 @@ print(f['RINGGEOringradius2'])
 print()
 print()
 
-rdf = O.get_raw_fields_as_df()
+rdf = O.raw_fields_as_df
 print('*** Raw Fields as DataFrame:')
 print(rdf)
 print('Multiple:')
@@ -39,7 +39,7 @@ print(rdf.loc['RINGGEOringradius2'])
 print()
 print()
 
-f = O.get_fields()
+f = O.fields
 print('*** Fields as Dict:')
 print('Multiple:')
 print(f['target'])
@@ -55,7 +55,7 @@ print(f['RINGGEOringradius'])
 print()
 print()
 
-df = O.get_fields_as_df()
+df = O.fields_as_df
 print('*** Fields as DataFrame:')
 print(df)
 print('Multiple:')
@@ -71,3 +71,7 @@ print('Two-column range:')
 print(df.loc['RINGGEOringradius'])
 print()
 print()
+
+t = O.surfacegeo_targets
+print('*** Surface geometry targets')
+print(t)
