@@ -6,6 +6,9 @@ OPUSAPI class
 import json
 import pandas as pd
 import requests
+import warnings
+
+from opusapi.util import CaseInsensitiveDict
 
 _DEFAULT_OPUS_SERVER = 'https://opus.pds-rings.seti.org'
 
@@ -28,6 +31,7 @@ class OPUSAPI(object):
         self._fields_cache = None
         self._fields_as_df_cache = None
         self._surfacegeo_targets_cache = None
+        self._surfacegeo_fields_cache = None
 
     def __str__(self):
         return self._server
@@ -39,11 +43,11 @@ class OPUSAPI(object):
         """Make a call to the OPUS sever for a specific endpoint."""
         request_url = self._server+'/api/'+endpoint+'.'+return_format
         if self._verbose:
-            print('OPUSAPI request '+request_url+' params '+str(params))
+            print(f'OPUSAPI request {request_url} params {params}')
         r = requests.get(request_url, params=params)
         if not r.ok:
-            raise RuntimeError('OPUSAPI request failed: '+request_url
-                               +' with params '+str(params))
+            raise RuntimeError(f'OPUSAPI request failed: {request_url} ' +
+                               f' with params {params}')
         return r.json()
 
     @property
@@ -55,6 +59,8 @@ class OPUSAPI(object):
         fields_json = self._call_opus_api('fields', 'json')
         fields_ret = fields_json['data']
 
+        # Get rid of unnecessary fields that are present for backwards
+        # compatibility
         for raw_fieldid in fields_ret:
             if 'slug' in fields_ret[raw_fieldid]:
                 del fields_ret[raw_fieldid]['slug']
@@ -62,7 +68,6 @@ class OPUSAPI(object):
                 del fields_ret[raw_fieldid]['old_slug']
 
         self._raw_fields_cache = fields_ret
-
         return self._raw_fields_cache
 
     @property
@@ -95,7 +100,6 @@ class OPUSAPI(object):
                                  index=raw_fieldids)
 
         self._raw_fields_as_df_cache = ret_frame
-
         return self._raw_fields_as_df_cache
 
     def _get_fields(self):
@@ -211,16 +215,10 @@ class OPUSAPI(object):
               }
 
         self._fields_cache = ret
-
         return self._fields_cache
 
-    @property
-    def fields_as_df(self):
-        """Return the analyzed set of OPUS fields as a DataFrame indexed by fieldid."""
-        if self._fields_as_df_cache is not None:
-            return self._fields_as_df_cache
-
-        fields = self.fields
+    def _extract_fields_as_df(self, fields):
+        """Convert fields into a DataFrame."""
         fieldids = fields.keys()
 
         categories = [fields[id]['category'] for id in fieldids]
@@ -231,6 +229,8 @@ class OPUSAPI(object):
         label2s = [fields[id]['label2'] for id in fieldids]
         full_label1s = [fields[id]['full_label1'] for id in fieldids]
         full_label2s = [fields[id]['full_label2'] for id in fieldids]
+        search_fieldid1s = [fields[id]['search_fieldid1'] for id in fieldids]
+        search_fieldid2s = [fields[id]['search_fieldid2'] for id in fieldids]
         search_labels = [fields[id]['search_label'] for id in fieldids]
         full_search_labels = [fields[id]['full_search_label']
                               for id in fieldids]
@@ -247,40 +247,110 @@ class OPUSAPI(object):
                                   'label2': label2s,
                                   'full_label1': full_label1s,
                                   'full_label2': full_label2s,
+                                  'search_fieldid1': search_fieldid1s,
+                                  'search_fieldid2': search_fieldid2s,
                                   'search_label': search_labels,
                                   'full_search_label': full_search_labels,
                                   'single_value': single_values,
                                   'default_units': default_units,
                                   'available_units': available_units},
                                  index=fieldids)
-
-        self._fields_as_df_cache = ret_frame
-
-        return self._fields_as_df_cache
+        return ret_frame
 
     @property
-    def surfacegeo_targets(self):
-        """Return the list of targets that surface geometry is available for."""
+    def fields_as_df(self):
+        """Return the analyzed set of OPUS fields as a DataFrame indexed by fieldid."""
+        if self._fields_as_df_cache is not None:
+            return self._fields_as_df_cache
+
+        ret_frame = self._extract_fields_as_df(self.fields)
+
+        self._fields_as_df_cache = ret_frame
+        return self._fields_as_df_cache
+
+    def _extract_surfacegeo_targets_fields(self):
+        """Extract surfacegeo targets and fields."""
         if self._surfacegeo_targets_cache is not None:
-            return self._surfacegeo_targets_cache
+            return (self._surfacegeo_targets_cache,
+                    self._surfacegeo_fields_cache)
 
-        raw_fields = self.raw_fields
+        raw_fields = self.fields
 
-        target_set = set()
-        for fieldid in raw_fields:
+        target_dict = CaseInsensitiveDict()
+        fields_dict = {}
+        for fieldid, field in raw_fields.items():
             if not fieldid.startswith('SURFACEGEO'):
                 continue
             field_split = fieldid[10:].split('_')
             if len(field_split) != 2:
-                warning('Bad format for surface geometry field: '+fieldid)
+                warnings.warn('Bad format for surface geometry field: '+fieldid)
                 continue
-            target_set.add(field_split[0])
+            label = field['full_search_label']
+            if '[' not in label or ']' not in label:
+                warnings.warn('Bad format for surface geometry label: '+label)
+                continue
+            target_name = label[label.index('[')+1:label.index(']')]
+            target_dict[target_name] = field_split[0]
+            if field_split[1] not in fields_dict:
+                fields_dict[field_split[1]] = field
 
-        self._surfacegeo_targets_cache = sorted(target_set)
+        self._surfacegeo_targets_cache = target_dict
+        self._surfacegeo_fields_cache = fields_dict
 
-        return self._surfacegeo_targets_cache
+        return (self._surfacegeo_targets_cache,
+                self._surfacegeo_fields_cache)
 
-    def get_count(self, query):
-        params = query.get_api_params(opusapi=self)
+    @property
+    def surfacegeo_targets(self):
+        """Return the list of targets that surface geometry is available for."""
+        return self._extract_surfacegeo_targets_fields()[0]
+
+    @property
+    def surfacegeo_fields(self):
+        """Return the available surface geometry metadata fields."""
+        return self._extract_surfacegeo_targets_fields()[1]
+
+    @property
+    def surfacegeo_fields_as_df(self):
+        """Return the available surface geometry metadata fields."""
+        fields = self._extract_surfacegeo_targets_fields()[1]
+        return self._extract_fields_as_df(fields)
+
+    def make_surfacegeo_field(self, target, field_root):
+        """Construct a fieldid from a target name and fieldid root."""
+        targets = self.surfacegeo_targets
+        # Look up the pretty name in case it was provided
+        if target in targets:
+            target = targets[target]
+        target = target.lower()
+        return f'SURFACEGEO{target}_{field_root}'
+
+    ### Meta API Calls
+
+    def get_count(self, query=None):
+        """Return the result count from a search."""
+        params = None if query is None else query.get_api_params(opusapi=self)
         res = self._call_opus_api('meta/result_count', 'json', params=params)
         return int(res['data'][0]['result_count'])
+
+    def get_mults(self, fieldid, query=None):
+        """Return the available values from a multiple choice field along with
+        their result count from a search."""
+        params = None if query is None else query.get_api_params(opusapi=self)
+        if fieldid not in self.fields:
+            raise RuntimeError(f'Field id "{fieldid}" unknown')
+        if self.fields[fieldid]['type'] != 'multiple':
+            raise RuntimeError(f'Field id "{fieldid}" is not type "multiple"')
+        res = self._call_opus_api('meta/mults/'+fieldid, 'json', params=params)
+        return res['mults']
+
+    def get_range_endpoints(self, fieldid, query=None):
+        """Return the endpoints for a range based on a search."""
+        params = None if query is None else query.get_api_params(opusapi=self)
+        if fieldid not in self.fields:
+            raise RuntimeError(f'Field id "{fieldid}" unknown')
+        if not self.fields[fieldid]['type'].startswith('range'):
+            raise RuntimeError(f'Field id "{fieldid}" is not type "range"')
+        res = self._call_opus_api('meta/range/endpoints/'+fieldid, 'json',
+                                  params=params)
+        return res['min'], res['max'], res['nulls'], res['units']

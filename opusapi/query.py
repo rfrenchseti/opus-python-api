@@ -4,7 +4,9 @@ OPUS Query class
 """
 
 class Query(object):
+    """Construct a conjunctive (AND) series of queries."""
     def __init__(self, *args):
+        """Query constructor."""
         self._conj_list = []
         for arg in args:
             self._conj_list.append(arg)
@@ -22,16 +24,30 @@ class Query(object):
         return 'Query(' + ','.join(conj_repr) + ')'
 
     def get_api_params(self, opusapi=None):
+        """Get the OPUS API parameters required for a search."""
         params = {}
         for conj in self._conj_list:
-            params.update(conj.get_api_params(opusapi=opusapi))
+            # This is an obscure but efficient way to make sure the same
+            # fieldid doesn't appear twice and throw an exception if it does
+            params = dict(**params, **conj.get_api_params(opusapi=opusapi))
         return params
 
 class OR(object):
+    """Construct a disjunctive (OR) series of queries."""
     def __init__(self, *args):
         self._disj_list = []
+        fieldid = None
         for arg in args:
+            if not isinstance(arg, (StringQuery, RangeQuery)):
+                raise RuntimeError(
+                    'Only StringQuery and RangeQuery may be used with OR')
             self._disj_list.append(arg)
+            if fieldid is None:
+                fieldid = arg.fieldid
+            elif fieldid != arg.fieldid:
+                raise RuntimeError(
+                    'Attempt to create OR query with different fieldids ' +
+                    f'"{fieldid}" and "{arg.fieldid}"')
 
     def __str__(self):
         ret = 'OR:'
@@ -46,45 +62,14 @@ class OR(object):
         return 'OR(' + ','.join(disj_repr) + ')'
 
     def get_api_params(self, opusapi=None):
+        """Get the OPUS API parameters required for a search."""
         params = {}
         for idx, disj in enumerate(self._disj_list):
-            params.update(disj.get_api_params(opusapi=opusapi,
-                                              suffix=idx+1))
+            # This is an obscure but efficient way to make sure the same
+            # fieldid doesn't appear twice and throw an exception if it does
+            params = dict(**params, **disj.get_api_params(opusapi=opusapi,
+                                                          suffix=idx+1))
         return params
-
-class StringQuery(Query):
-    def __init__(self, fieldid, val, qtype='contains'):
-        super(StringQuery, self).__init__()
-        qtype = qtype.lower()
-        assert qtype in ('contains', 'begins', 'ends', 'matches', 'excludes',
-                         'regex')
-        self._fieldid = fieldid
-        self._val = val
-        self._qtype = qtype
-
-    def __str__(self):
-        ret = f'StringQuery {self._fieldid}={self._val} ({self._qtype})'
-        return ret
-
-    def __repr__(self):
-        return (f'StringQuery({repr(self._fieldid)},{repr(self._val)},' +
-                f'{repr(self._qtype)})')
-
-    def get_api_params(self, opusapi=None, suffix=None):
-        if opusapi is not None:
-            fields = opusapi.fields
-            if self._fieldid not in fields:
-                raise RuntimeError('Unknown field id "'+self._fieldid+'"')
-            f_type = fields[self._fieldid]['type']
-            if f_type != 'string':
-                raise RuntimeError(f'Field id "{self._fieldid}"' +
-                                   f' is type "{f_type}" not type "string"')
-
-        fieldid = self._fieldid
-        if suffix is not None:
-            fieldid += '_'+str(suffix)
-        return {fieldid: self._val,
-                'qtype-'+self._fieldid: self._qtype}
 
 class MultQuery(Query):
     def __init__(self, fieldid, vals):
@@ -108,7 +93,12 @@ class MultQuery(Query):
             val_repr = repr(self._vals[0])
         return f'MultQuery({repr(self._fieldid)},{val_repr})'
 
+    @property
+    def fieldid(self):
+        return self._fieldid
+
     def get_api_params(self, opusapi=None):
+        """Get the OPUS API parameters required for a search."""
         if opusapi is not None:
             fields = opusapi.fields
             if self._fieldid not in fields:
@@ -119,6 +109,45 @@ class MultQuery(Query):
                                    f'"{f_type}" not type "multiple"')
 
         return {self._fieldid: ','.join(self._vals)}
+
+class StringQuery(Query):
+    def __init__(self, fieldid, val, qtype='contains'):
+        super(StringQuery, self).__init__()
+        qtype = qtype.lower()
+        assert qtype in ('contains', 'begins', 'ends', 'matches', 'excludes',
+                         'regex')
+        self._fieldid = fieldid
+        self._val = val
+        self._qtype = qtype
+
+    def __str__(self):
+        ret = f'StringQuery {self._fieldid}={self._val} ({self._qtype})'
+        return ret
+
+    def __repr__(self):
+        return (f'StringQuery({repr(self._fieldid)},{repr(self._val)},' +
+                f'{repr(self._qtype)})')
+
+    @property
+    def fieldid(self):
+        return self._fieldid
+
+    def get_api_params(self, opusapi=None, suffix=None):
+        """Get the OPUS API parameters required for a search."""
+        if opusapi is not None:
+            fields = opusapi.fields
+            if self._fieldid not in fields:
+                raise RuntimeError('Unknown field id "'+self._fieldid+'"')
+            f_type = fields[self._fieldid]['type']
+            if f_type != 'string':
+                raise RuntimeError(f'Field id "{self._fieldid}"' +
+                                   f' is type "{f_type}" not type "string"')
+
+        fieldid = self._fieldid
+        if suffix is not None:
+            fieldid += '_'+str(suffix)
+        return {fieldid: self._val,
+                'qtype-'+fieldid: self._qtype}
 
 class RangeQuery(Query):
     def __init__(self, fieldid, minimum=None, maximum=None, qtype=None,
@@ -158,7 +187,12 @@ class RangeQuery(Query):
             param_list.append('unit='+repr(self._unit))
         return 'RangeQuery(' + ','.join(param_list) + ')'
 
+    @property
+    def fieldid(self):
+        return self._fieldid
+
     def get_api_params(self, opusapi=None, suffix=None):
+        """Get the OPUS API parameters required for a search."""
         if opusapi is not None:
             fields = opusapi.fields
             if self._fieldid not in fields:
