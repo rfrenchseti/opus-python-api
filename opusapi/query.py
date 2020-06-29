@@ -100,13 +100,18 @@ class MultQuery(Query):
     def get_api_params(self, opusapi=None):
         """Get the OPUS API parameters required for a search."""
         if opusapi is not None:
-            fields = opusapi.fields
-            if self._fieldid not in fields:
-                raise RuntimeError(f'Unknown field id "{self._fieldid}"')
-            f_type = fields[self._fieldid]['type']
-            if f_type != 'multiple':
-                raise RuntimeError(f'Field id "{self._fieldid}" is type ' +
-                                   f'"{f_type}" not type "multiple"')
+            try:
+                fields = opusapi.fields
+            except AttributeError:
+                # OPUSAPIRaw doesn't support "fields" so we don't validate
+                pass
+            else:
+                if self._fieldid not in fields:
+                    raise RuntimeError(f'Unknown field id "{self._fieldid}"')
+                f_type = fields[self._fieldid]['type']
+                if f_type != 'multiple':
+                    raise RuntimeError(f'Field id "{self._fieldid}" is type ' +
+                                       f'"{f_type}" not type "multiple"')
 
         return {self._fieldid: ','.join(self._vals)}
 
@@ -135,13 +140,18 @@ class StringQuery(Query):
     def get_api_params(self, opusapi=None, suffix=None):
         """Get the OPUS API parameters required for a search."""
         if opusapi is not None:
-            fields = opusapi.fields
-            if self._fieldid not in fields:
-                raise RuntimeError('Unknown field id "'+self._fieldid+'"')
-            f_type = fields[self._fieldid]['type']
-            if f_type != 'string':
-                raise RuntimeError(f'Field id "{self._fieldid}"' +
-                                   f' is type "{f_type}" not type "string"')
+            try:
+                fields = opusapi.fields
+            except AttributeError:
+                # OPUSAPIRaw doesn't support "fields" so we don't validate
+                pass
+            else:
+                if self._fieldid not in fields:
+                    raise RuntimeError('Unknown field id "'+self._fieldid+'"')
+                f_type = fields[self._fieldid]['type']
+                if f_type != 'string':
+                    raise RuntimeError(f'Field id "{self._fieldid}"' +
+                                       f' is type "{f_type}" not type "string"')
 
         fieldid = self._fieldid
         if suffix is not None:
@@ -194,24 +204,30 @@ class RangeQuery(Query):
     def get_api_params(self, opusapi=None, suffix=None):
         """Get the OPUS API parameters required for a search."""
         if opusapi is not None:
-            fields = opusapi.fields
-            if self._fieldid not in fields:
-                raise RuntimeError('Unknown field id "'+self._fieldid+'"')
-            field = fields[self._fieldid]
-            f_type = field['type']
-            if not f_type.startswith('range'):
-                raise RuntimeError(f'Field id "{self._fieldid}" is type ' +
-                                   f'"{f_type}" not type "range"')
-            if field['single_value'] and self._qtype is not None:
-                raise RuntimeError(f'Field id "{self._fieldid}" ' +
-                                   'is single value but qtype supplied')
-            available_units = field['available_units']
-            if (self._unit is not None and
-                self._unit not in available_units):
-                avail_str = ','.join(available_units)
-                raise RuntimeError(f'Field id "{self._fieldid}" ' +
-                                   f'unit "{self._unit}" is unknown ' +
-                                   f'(available: {avail_str})')
+            try:
+                fields = opusapi.fields
+            except AttributeError:
+                # OPUSAPIRaw doesn't support "fields" so we don't validate
+                pass
+            else:
+                if self._fieldid not in fields:
+                    raise RuntimeError('Unknown field id "'+self._fieldid+'"')
+                field = fields[self._fieldid]
+                f_type = field['type']
+                if not f_type.startswith('range'):
+                    raise RuntimeError(f'Field id "{self._fieldid}" is type ' +
+                                       f'"{f_type}" not type "range"')
+                if field['single_value'] and self._qtype is not None:
+                    raise RuntimeError(f'Field id "{self._fieldid}" ' +
+                                       'is single value but qtype supplied')
+                available_units = field['available_units']
+                if (self._unit is not None and
+                    self._unit not in available_units):
+                    avail_str = ','.join(available_units)
+                    raise RuntimeError(f'Field id "{self._fieldid}" ' +
+                                       f'unit "{self._unit}" is unknown ' +
+                                       f'(available: {avail_str})')
+
         suffix_str = ''
         if suffix is not None:
             suffix_str = '_' + str(suffix)
